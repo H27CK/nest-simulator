@@ -127,8 +127,10 @@ nest::MPIManager::init_mpi( int* argc, char** argv[] )
   // use at least 2 * number of processes entries (need at least two
   // entries per process to use flag of first entry as validity and
   // last entry to communicate end of communication)
-  kernel().mpi_manager.set_buffer_size_target_data( 2 * kernel().mpi_manager.get_num_processes() );
-  kernel().mpi_manager.set_buffer_size_spike_data( 2 * kernel().mpi_manager.get_num_processes() );
+  kernel().mpi_manager.set_buffer_size_target_data( 2
+    * kernel().mpi_manager.get_num_processes() );
+  kernel().mpi_manager.set_buffer_size_spike_data( 100000
+    * kernel().mpi_manager.get_num_processes() );
 
   // create off-grid-spike type for MPI communication
   // creating derived datatype
@@ -156,6 +158,10 @@ nest::MPIManager::init_mpi( int* argc, char** argv[] )
   MPI_Type_commit( &MPI_OFFGRID_SPIKE );
 
   use_mpi_ = true;
+
+  recv_counts = new int [ kernel().mpi_manager.get_num_processes() ];
+  send_counts = new int [ kernel().mpi_manager.get_num_processes() ];
+  send_displs = new int [ kernel().mpi_manager.get_num_processes() ];
 }
 
 #endif /* #ifdef HAVE_MPI */
@@ -241,6 +247,10 @@ nest::MPIManager::mpi_finalize( int exitcode )
       mpi_abort( exitcode );
     }
   }
+
+  delete[] recv_counts;
+  delete[] send_counts;
+  delete[] send_displs;
 #endif /* #ifdef HAVE_MPI */
 }
 
@@ -709,6 +719,19 @@ nest::MPIManager::communicate_Alltoall_( void* send_buffer, void* recv_buffer, c
   MPI_Alltoall( send_buffer, send_recv_count, MPI_UNSIGNED, recv_buffer, send_recv_count, MPI_UNSIGNED, comm );
 }
 
+void
+nest::MPIManager::communicate_Alltoallv_( void* send_buffer, void* recv_buffer,
+    int send_counts[], int recv_counts[], int send_displs[] )
+{
+  // send counts first
+  MPI_Alltoall( send_counts, 1,
+    MPI_INT, recv_counts, 1,
+    MPI_INT, comm );
+  // exchange spikes
+  MPI_Alltoallv( send_buffer, send_counts, send_displs,
+    MPI_UNSIGNED, recv_buffer, recv_counts, send_displs,
+    MPI_UNSIGNED, comm );
+}
 
 void
 nest::MPIManager::communicate_secondary_events_Alltoall_( void* send_buffer, void* recv_buffer )

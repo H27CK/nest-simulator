@@ -197,6 +197,10 @@ public:
 
 #ifdef HAVE_MPI
   void communicate_Alltoall_( void* send_buffer, void* recv_buffer, const unsigned int send_recv_count );
+  void communicate_Alltoallv_(
+    void* send_buffer,
+    void* recv_buffer,
+    int send_counts[], int recv_counts[], int send_displs[] );
 
   void communicate_secondary_events_Alltoall_( void* send_buffer, void* recv_buffer );
 #endif // HAVE_MPI
@@ -206,9 +210,18 @@ public:
     std::vector< D >& recv_buffer,
     const unsigned int send_recv_count );
   template < class D >
+  void communicate_Alltoallv( std::vector< D >& send_buffer,
+    std::vector< D >& recv_buffer,
+    int send_counts[],
+    int recv_counts[],
+    int send_displs[] );
+  template < class D >
   void communicate_target_data_Alltoall( std::vector< D >& send_buffer, std::vector< D >& recv_buffer );
   template < class D >
   void communicate_spike_data_Alltoall( std::vector< D >& send_buffer, std::vector< D >& recv_buffer );
+  template < class D >
+  void communicate_spike_data_Alltoallv( std::vector< D >& send_buffer, std::vector< D >& recv_buffer,
+    std::vector< unsigned int >& send_counts_spike_data );
   template < class D >
   void communicate_off_grid_spike_data_Alltoall( std::vector< D >& send_buffer, std::vector< D >& recv_buffer );
   template < class D >
@@ -244,12 +257,6 @@ public:
    * needs to be increased. Returns whether the size was changed.
    */
   bool increase_buffer_size_target_data();
-
-  /**
-   * Increases the size of the MPI buffer for communication of spikes if it
-   * needs to be increased. Returns whether the size was changed.
-   */
-  bool increase_buffer_size_spike_data();
 
   /**
    * Returns whether MPI buffers for communication of connections are adaptive.
@@ -294,8 +301,12 @@ private:
   unsigned int send_recv_count_spike_data_per_rank_;
   unsigned int send_recv_count_target_data_per_rank_;
 
+  int *recv_counts;
+  int *send_counts;
+  int *send_displs;
+
 #ifdef HAVE_MPI
-  //! array containing communication partner for each step.
+  //! Array containing communication partner for each step.
   std::vector< int > comm_step_;
   unsigned int COMM_OVERFLOW_ERROR;
 
@@ -527,28 +538,6 @@ MPIManager::increase_buffer_size_target_data()
 }
 
 inline bool
-MPIManager::increase_buffer_size_spike_data()
-{
-  assert( adaptive_spike_buffers_ );
-  if ( buffer_size_spike_data_ >= max_buffer_size_spike_data_ )
-  {
-    return false;
-  }
-  else
-  {
-    if ( buffer_size_spike_data_ * growth_factor_buffer_spike_data_ < max_buffer_size_spike_data_ )
-    {
-      set_buffer_size_spike_data( floor( buffer_size_spike_data_ * growth_factor_buffer_spike_data_ ) );
-    }
-    else
-    {
-      set_buffer_size_spike_data( max_buffer_size_spike_data_ );
-    }
-    return true;
-  }
-}
-
-inline bool
 MPIManager::adaptive_target_buffers() const
 {
   return adaptive_target_buffers_;
@@ -663,6 +652,20 @@ MPIManager::communicate_Alltoall( std::vector< D >& send_buffer,
 
 template < class D >
 void
+MPIManager::communicate_Alltoallv( std::vector< D >& send_buffer,
+  std::vector< D >& recv_buffer,
+  int send_counts[],
+  int recv_counts[],
+  int send_displs[] )
+{
+  void* send_buffer_int = static_cast< void* >( &send_buffer[ 0 ] );
+  void* recv_buffer_int = static_cast< void* >( &recv_buffer[ 0 ] );
+
+  communicate_Alltoallv_( send_buffer_int, recv_buffer_int, send_counts, recv_counts, send_displs );
+}
+
+template < class D >
+void
 MPIManager::communicate_secondary_events_Alltoall( std::vector< D >& send_buffer, std::vector< D >& recv_buffer )
 {
   void* send_buffer_int = static_cast< void* >( &send_buffer[ 0 ] );
@@ -709,6 +712,27 @@ MPIManager::communicate_spike_data_Alltoall( std::vector< D >& send_buffer, std:
     sizeof( SpikeData ) / sizeof( unsigned int ) * send_recv_count_spike_data_per_rank_;
 
   communicate_Alltoall( send_buffer, recv_buffer, send_recv_count_spike_data_in_int_per_rank );
+}
+
+template < class D >
+void
+MPIManager::communicate_spike_data_Alltoallv(
+  std::vector< D >& send_buffer,
+  std::vector< D >& recv_buffer,
+  std::vector< unsigned int >& send_counts_spike_data )
+{
+  const size_t send_recv_count_spike_data_in_int_per_rank =
+    sizeof( D ) / sizeof( unsigned int ) * send_recv_count_spike_data_per_rank_;
+
+  for ( int rank = 0; rank < get_num_processes(); ++rank )
+  {
+    recv_counts[ rank ] = 0;
+  //send_counts[ rank ] = send_recv_count_spike_data_in_int_per_rank;
+    send_counts[ rank ] = sizeof( D ) / sizeof( unsigned int ) * send_counts_spike_data[ rank ];
+    send_displs[ rank ] = rank * send_recv_count_spike_data_in_int_per_rank;
+  }
+
+  communicate_Alltoallv( send_buffer, recv_buffer, send_counts, recv_counts, send_displs );
 }
 
 template < class D >
