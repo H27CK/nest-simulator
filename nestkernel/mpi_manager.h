@@ -749,6 +749,7 @@ MPIManager::communicate_spike_data_Alltoallv(
   communicate_Alltoallv( send_buffer, recv_buffer, send_counts, recv_counts, send_displs );
 }
 
+// Experimental. Hacky and not optimised.
 template < class D >
 void
 MPIManager::communicate_spike_data_Put(
