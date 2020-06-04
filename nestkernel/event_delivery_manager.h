@@ -441,6 +441,11 @@ private:
   bool buffer_size_spike_data_has_changed_;
 
   PerThreadBoolIndicator gather_completed_checker_;
+
+  /**
+   * MPI Window object for one-sided communication.
+   */
+  MPI_Win win;
 };
 
 inline void

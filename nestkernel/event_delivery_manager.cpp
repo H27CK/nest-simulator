@@ -44,6 +44,8 @@
 // Includes from sli:
 #include "dictutils.h"
 
+#define USE_MPI_PUT
+
 namespace nest
 {
 EventDeliveryManager::EventDeliveryManager()
@@ -117,6 +119,8 @@ EventDeliveryManager::finalize()
   recv_buffer_spike_data_.clear();
   send_buffer_off_grid_spike_data_.clear();
   recv_buffer_off_grid_spike_data_.clear();
+
+  //MPI_Win_free( &win );
 }
 
 void
@@ -150,6 +154,13 @@ EventDeliveryManager::resize_send_recv_buffers_spike_data_()
   recv_buffer_spike_data_.resize( kernel().mpi_manager.get_buffer_size_spike_data() );
   send_buffer_off_grid_spike_data_.resize( kernel().mpi_manager.get_buffer_size_spike_data() );
   recv_buffer_off_grid_spike_data_.resize( kernel().mpi_manager.get_buffer_size_spike_data() );
+
+#ifdef USE_MPI_PUT
+  MPI_Win_create( &recv_buffer_spike_data_[0],
+      sizeof( SpikeData ) * kernel().mpi_manager.get_buffer_size_spike_data(),
+      sizeof( SpikeData ), MPI_INFO_NULL, MPI_COMM_WORLD, &win );
+  MPI_Win_fence( MPI_MODE_NOPRECEDE, win );
+#endif
 }
 
 void
@@ -375,7 +386,13 @@ EventDeliveryManager::gather_spike_data_( const thread tid,
       }
       else
       {
-        kernel().mpi_manager.communicate_spike_data_Alltoallv( send_buffer, recv_buffer, send_buffer_spike_data_counts_ );
+#ifdef USE_MPI_PUT
+        kernel().mpi_manager.communicate_spike_data_Put(
+          send_buffer, recv_buffer, send_buffer_spike_data_counts_, win );
+#else
+        kernel().mpi_manager.communicate_spike_data_Alltoallv(
+          send_buffer, recv_buffer, send_buffer_spike_data_counts_ );
+#endif
       }
     } // of omp single; implicit barrier
 

@@ -203,6 +203,10 @@ public:
     int send_counts[], int recv_counts[], int send_displs[] );
 
   void communicate_secondary_events_Alltoall_( void* send_buffer, void* recv_buffer );
+
+  template < class D >
+  void communicate_spike_data_Put( std::vector< D >& send_buffer, std::vector< D >& recv_buffer,
+    std::vector< unsigned int >& send_counts_spike_data, MPI_Win& win );
 #endif // HAVE_MPI
 
   template < class D >
@@ -716,6 +720,16 @@ MPIManager::communicate_spike_data_Alltoall( std::vector< D >& send_buffer, std:
 
 template < class D >
 void
+MPIManager::communicate_off_grid_spike_data_Alltoall( std::vector< D >& send_buffer, std::vector< D >& recv_buffer )
+{
+  const size_t send_recv_count_off_grid_spike_data_in_int_per_rank =
+    sizeof( OffGridSpikeData ) / sizeof( unsigned int ) * send_recv_count_spike_data_per_rank_;
+
+  communicate_Alltoall( send_buffer, recv_buffer, send_recv_count_off_grid_spike_data_in_int_per_rank );
+}
+
+template < class D >
+void
 MPIManager::communicate_spike_data_Alltoallv(
   std::vector< D >& send_buffer,
   std::vector< D >& recv_buffer,
@@ -737,12 +751,40 @@ MPIManager::communicate_spike_data_Alltoallv(
 
 template < class D >
 void
-MPIManager::communicate_off_grid_spike_data_Alltoall( std::vector< D >& send_buffer, std::vector< D >& recv_buffer )
+MPIManager::communicate_spike_data_Put(
+  std::vector< D >& send_buffer,
+  std::vector< D >& recv_buffer,
+  std::vector< unsigned int >& send_counts_spike_data,
+  MPI_Win& win )
 {
-  const size_t send_recv_count_off_grid_spike_data_in_int_per_rank =
-    sizeof( OffGridSpikeData ) / sizeof( unsigned int ) * send_recv_count_spike_data_per_rank_;
+  for ( int rank = 0; rank < get_num_processes(); ++rank )
+  {
+    send_counts[ rank ] = sizeof( D ) / sizeof( unsigned int ) * send_counts_spike_data[ rank ];
+    send_displs[ rank ] = rank * send_recv_count_spike_data_per_rank_;
+  }
 
-  communicate_Alltoall( send_buffer, recv_buffer, send_recv_count_off_grid_spike_data_in_int_per_rank );
+  int N = get_num_processes();
+  int R = get_rank();
+  int src, dst;
+
+  MPI_Win_fence( MPI_MODE_NOPRECEDE, win );
+  for ( int rank = 0; rank < get_num_processes(); ++rank )
+  {
+    src = ( R - rank + N ) % N;
+    dst = ( R + rank ) % N;
+
+    void* send_buffer_int = static_cast< void* >( &send_buffer[ send_displs[ dst ] ] );
+
+    if ( send_counts[ dst ] > 0 )
+    {
+      MPI_Put( send_buffer_int,
+          send_counts[ dst ], MPI_UNSIGNED, dst, send_displs[ R ],
+          send_counts[ dst ], MPI_UNSIGNED, win );
+      //printf( "bytes: [%d -> %d, %lu]\n",
+      //		get_rank(), dst, ( sizeof( unsigned int ) * send_counts[ dst ] ) );
+    }
+  }
+  MPI_Win_fence( ( MPI_MODE_NOPUT | MPI_MODE_NOSUCCEED ), win );
 }
 }
 
